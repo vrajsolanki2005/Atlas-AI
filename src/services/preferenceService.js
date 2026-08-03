@@ -17,4 +17,18 @@ async function updatePreference(userId, updates) {
     }
     return preference;
 }
-module.exports = { createOrUpdatePreference, updatePreference };
+
+async function updateProfile(userId, newProfile) {
+  let pref = await createOrUpdatePreference(userId);
+
+  const merge = require("../utils/profileMerge");
+
+  const profile = merge(pref.profile || {}, newProfile);
+
+  await pref.update({
+    profile,
+  });
+
+  return profile;
+}
+module.exports = { createOrUpdatePreference, updatePreference, updateProfile };

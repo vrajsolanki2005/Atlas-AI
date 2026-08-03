@@ -1,6 +1,7 @@
 const { Telegraf, session, Scenes } = require("telegraf");
 const registerHandlers = require("./handlers");
 const onboardingScene = require("../scenes/onboarding.scene");
+const Conversation = require("../models/Conversation");
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const stage = new Scenes.Stage([onboardingScene]);
 
