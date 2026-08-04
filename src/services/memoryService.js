@@ -1,4 +1,4 @@
-const conversationService = require("../services/conversationService");
+const conversationService = require("../services/ConversationService");
 
 class MemoryService {
   // Save a single message (used by onboarding, which saves user and
