@@ -17,24 +17,25 @@ const {
   updateProfile,
 } = require("../services/preferenceService");
 
+const DONE_MSG = `✅ Done!\n\nYour preferences have been updated.\nAtlas will personalize future briefings accordingly.`;
+
 module.exports = (bot) => {
   bot.start(async (ctx) => {
     const user = await createOrFindUser(ctx);
     const preference = await createOrUpdatePreference(user.id);
 
     if (preference.onboardingCompleted) {
+      const hour = new Date().getHours();
+      const greeting = hour < 12 ? "Good Morning" : hour < 18 ? "Good Afternoon" : "Good Evening";
+      const emoji = hour < 12 ? "🌅" : hour < 18 ? "🌞" : "🌆";
       return ctx.reply(
-        `👋 Welcome back ${user.firstName}!\n\nWhat would you like to do today?\n\n📈 Morning Brief\n💬 Ask Atlas\n⭐ Watchlist\n⚙ Settings`,
+        `${emoji} ${greeting}, ${user.firstName}!\n\nReady for today's insights?`,
         homeMenu(),
       );
     }
 
     await ctx.reply(
-      `👋 Hi, I'm Atlas.
-
-Think of me as your personal intelligence assistant. I'll help you stay updated on what matters most without overwhelming you.
-
-To personalize your experience, let's begin.`,
+      `👋 Hi, I'm Atlas.\n\nThink of me as your personal intelligence assistant. I'll help you stay updated on what matters most without overwhelming you.\n\nTo personalize your experience, let's begin.`,
       Markup.inlineKeyboard([
         [Markup.button.callback("🚀 Let's Start", "start_onboarding")],
         [Markup.button.callback("Skip", "skip")],
@@ -50,15 +51,7 @@ To personalize your experience, let's begin.`,
     ctx.session.mode = "onboarding";
 
     await ctx.reply(
-      `Awesome!
-
-Let's keep this conversational.
-
-Tell me a little about yourself.
-
-For example:
-
-"I'm a backend developer who follows Nvidia and Tesla."`,
+      `Awesome!\n\nLet's keep this conversational.\n\nTell me a little about yourself.\n\nFor example:\n\n"I'm a backend developer who follows Nvidia and Tesla."`,
     );
   });
 
@@ -73,6 +66,87 @@ For example:
     ctx.session.mode = null;
 
     return ctx.reply("You're ready 🚀", homeMenu());
+  });
+
+  bot.action("settings", async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.session.mode = "settings";
+    await ctx.reply(
+      "⚙️ Settings",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("👤 Profile", "profile")],
+        [Markup.button.callback("🕗 Briefing Time", "briefing_time")],
+        [Markup.button.callback("🔔 Notifications", "notifications")],
+        [Markup.button.callback("🏭 Industries", "industries")],
+        [Markup.button.callback("⭐ Watchlist", "watchlist")],
+        [Markup.button.callback("🏠 Home", "home")],
+      ]),
+    );
+  });
+
+  bot.action("profile", async (ctx) => {
+    await ctx.answerCbQuery();
+    const user = await getUserByTelegramId(ctx.from.id);
+    const pref = await createOrUpdatePreference(user.id);
+    const p = pref.profile || {};
+    await ctx.reply(
+      `👤 Profile\n\nProfession:\n${p.profession || "Not set"}\n\nIndustries:\n${(p.industries || []).join(", ") || "None"}\n\nCompanies:\n${(p.companies || []).join(", ") || "None"}\n\nBriefing:\n${p.briefing || "Morning"}`,
+    );
+  });
+
+  bot.action("briefing_time", async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      "Choose briefing time",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("🌅 Morning", "brief_morning")],
+        [Markup.button.callback("🌆 Evening", "brief_evening")],
+        [Markup.button.callback("🌞 Both", "brief_both")],
+      ]),
+    );
+  });
+
+  ["morning", "evening", "both"].forEach((time) => {
+    bot.action(`brief_${time}`, async (ctx) => {
+      await ctx.answerCbQuery();
+      const user = await getUserByTelegramId(ctx.from.id);
+      await updateProfile(user.id, { briefing: time });
+      await ctx.reply(DONE_MSG);
+    });
+  });
+
+  bot.action("notifications", async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      "Notification preference",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("Only Important", "notify_important")],
+        [Markup.button.callback("All Updates", "notify_all")],
+        [Markup.button.callback("Mute", "notify_none")],
+      ]),
+    );
+  });
+
+  ["important", "all", "none"].forEach((level) => {
+    bot.action(`notify_${level}`, async (ctx) => {
+      await ctx.answerCbQuery();
+      const user = await getUserByTelegramId(ctx.from.id);
+      await updateProfile(user.id, { notification: level });
+      await ctx.reply(DONE_MSG);
+    });
+  });
+
+  bot.action("industries", async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.session.mode = "industries";
+    await ctx.reply(
+      "Type industries separated by commas.\n\nExample:\nFinance, AI, Technology",
+    );
+  });
+
+  bot.action("home", async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply("What would you like to do today?", homeMenu());
   });
 
   bot.action("watchlist", async (ctx) => {
@@ -125,16 +199,13 @@ For example:
 
   bot.action("ask", async (ctx) => {
     await ctx.answerCbQuery();
-
     ctx.session.mode = "chat";
-
     await ctx.reply(
       "💬 Ask me anything about finance, companies, markets, or today's news.",
     );
   });
 
   bot.action("brief", async (ctx) => {
-    console.log("Brief clicked");
     let interval;
     try {
       await ctx.answerCbQuery();
@@ -172,6 +243,8 @@ For example:
         return handleChatMessage(ctx);
       case "watchlist":
         return handleWatchlistMessage(ctx);
+      case "industries":
+        return handleIndustriesMessage(ctx);
       default:
         return;
     }
@@ -258,6 +331,14 @@ For example:
     } finally {
       if (interval) clearInterval(interval);
     }
+  }
+
+  async function handleIndustriesMessage(ctx) {
+    const user = await getUserByTelegramId(ctx.from.id);
+    const industries = ctx.message.text.split(",").map((i) => i.trim()).filter(Boolean);
+    await updateProfile(user.id, { industries });
+    ctx.session.mode = null;
+    return ctx.reply(DONE_MSG);
   }
 
   async function handleWatchlistMessage(ctx) {
