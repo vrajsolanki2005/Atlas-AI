@@ -3,15 +3,13 @@ const onboardingPrompt = require("../prompts/onboardingPrompt");
 const chatPrompt = require("../prompts/chatPrompt");
 const financeService = require("./finance/financeService");
 const router = require("./router/aiRouter");
+const { buildMeetingPrepPrompt } = require("./agenda/agendaPrompt");
 
 class AIService {
   async analyzeConversation({ profile = {}, history = [], message }) {
     try {
       const messages = [
-        {
-          role: "system",
-          content: onboardingPrompt,
-        },
+        { role: "system", content: onboardingPrompt },
         ...history,
         {
           role: "user",
@@ -42,11 +40,10 @@ class AIService {
 
     switch (route) {
       case "finance":
+      case "live":
         return this.generateFinanceReply({ profile, history, question, watchedCompanies });
       case "comparison":
         return this.generateComparisonReply({ profile, history, question, watchedCompanies });
-      case "live":
-        return this.generateFinanceReply({ profile, history, question, watchedCompanies });
       default:
         return this.generateNormalReply({ profile, history, question, watchedCompanies });
     }
@@ -86,6 +83,54 @@ class AIService {
     return this._callGroq({ profile, history, watchedCompanies, userContent: question });
   }
 
+  async generateMeetingPrep({ profile, event }) {
+    const messages = [
+      { role: "system", content: chatPrompt },
+      { role: "system", content: `User Profile:\n${JSON.stringify(profile, null, 2)}` },
+      { role: "user", content: buildMeetingPrepPrompt(event) },
+    ];
+
+    const response = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages,
+      temperature: 0.4,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content?.trim()) throw new Error("Empty response");
+    return content.trim();
+  }
+
+  async generateCalendarInsight({ profile, events }) {
+    const eventList = events.length
+      ? events
+          .map((e) => {
+            const time = e.start ? new Date(e.start).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "";
+            return `• ${time}  ${e.title}`;
+          })
+          .join("\n")
+      : "No events today.";
+
+    const messages = [
+      { role: "system", content: chatPrompt },
+      { role: "system", content: `User Profile:\n${JSON.stringify(profile, null, 2)}` },
+      {
+        role: "user",
+        content: `The user asked about their calendar. Here are today's events:\n\n${eventList}\n\nFirst, list the events clearly. Then add a short "💡 Atlas Insight" — a one or two sentence observation about their day (e.g. back-to-back meetings, free afternoon, heavy morning). Be concise.`,
+      },
+    ];
+
+    const response = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages,
+      temperature: 0.4,
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content?.trim()) throw new Error("Empty response");
+    return content.trim();
+  }
+
   async _callGroq({ profile, history, watchedCompanies = [], userContent }) {
     const formattedHistory = history.map((msg) => ({
       role: msg.role,
@@ -113,9 +158,7 @@ class AIService {
     });
 
     const content = response.choices[0]?.message?.content;
-
     if (!content?.trim()) throw new Error("Empty response");
-
     return content.trim();
   }
 }

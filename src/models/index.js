@@ -4,12 +4,13 @@ require('./Preference');
 require('./Conversation');
 require('./BriefingLog');
 require('./Watchlist');
+require('./Agenda');
+require('./CalendarIntegration');
 
 async function syncDb() {
     try {
         await sequelize.authenticate();
         console.log('Database connection has been established successfully.');
-        
         await sequelize.sync({ alter: false });
         console.log('All models were synchronized successfully.');
     } catch (error) {
@@ -17,4 +18,4 @@ async function syncDb() {
     }
 }
 
-module.exports = {syncDb};
+module.exports = { syncDb };

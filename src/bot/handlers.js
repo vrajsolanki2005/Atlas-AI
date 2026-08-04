@@ -11,6 +11,8 @@ const aiService = require("../services/aiService");
 const memoryService = require("../services/memoryService");
 const briefingService = require("../services/briefing/briefingService");
 const conversationService = require("../services/ConversationService");
+const agendaService = require("../services/agenda/agendaService");
+const calendarService = require("../services/calendar/calendarService");
 const WatchlistService = require("../services/watchlist/watchlistService");
 const watchlistService = new WatchlistService();
 
@@ -60,13 +62,25 @@ module.exports = (bot) => {
     await ctx.reply("✅ Atlas has forgotten your profile and conversation history.");
   });
 
+  bot.command("connect_calendar", async (ctx) => {
+    const user = await getUserByTelegramId(ctx.from.id);
+    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
+    const url = `${baseUrl}/auth/google?telegramId=${user.telegramId}`;
+
+    await ctx.reply(
+      "🔗 Connect Google Calendar\n\nAllow Atlas to read your calendar so it can prepare you for meetings and give you daily insights.",
+      Markup.inlineKeyboard([
+        [Markup.button.url("Connect", url)],
+      ]),
+    );
+  });
+
   bot.action("start_onboarding", async (ctx) => {
     await ctx.answerCbQuery();
     if (ctx.session.mode === "onboarding") {
       return ctx.answerCbQuery("You're already onboarding 😊");
     }
     ctx.session.mode = "onboarding";
-
     await ctx.reply(
       `Awesome!\n\nLet's keep this conversational.\n\nTell me a little about yourself.\n\nFor example:\n\n"I'm a backend developer who follows Nvidia and Tesla."`,
     );
@@ -74,16 +88,145 @@ module.exports = (bot) => {
 
   bot.action("skip", async (ctx) => {
     await ctx.answerCbQuery();
-
     const user = await getUserByTelegramId(ctx.from.id);
     const preference = await createOrUpdatePreference(user.id);
-
     await preference.update({ onboardingCompleted: true });
-
     ctx.session.mode = null;
-
     return ctx.reply("You're ready 🚀", homeMenu());
   });
+
+  // ─── Agenda ────────────────────────────────────────────────────────────────
+
+  bot.action("agenda", async (ctx) => {
+    await ctx.answerCbQuery();
+    const user = await getUserByTelegramId(ctx.from.id);
+
+    // Prefer Google Calendar if connected, fall back to local agenda
+    const integration = await calendarService.getIntegration(user.id);
+    let events;
+    let source;
+
+    if (integration) {
+      events = await calendarService.getTodayEvents(user.id);
+      source = "google";
+    } else {
+      events = await agendaService.getTodayEvents(user.id);
+      source = "local";
+    }
+
+    const eventList = events.length
+      ? events.map((e) => {
+          if (source === "google") {
+            const time = e.start ? new Date(e.start).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "";
+            return `🕐 ${time}  ${e.title}`;
+          }
+          return `🕐 ${e.time}  ${e.title}`;
+        }).join("\n")
+      : "No events scheduled for today.";
+
+    const buttons = [
+      [Markup.button.callback("🧠 Prepare for Next Meeting", "agenda_prepare")],
+      [Markup.button.callback("🏠 Home", "home")],
+    ];
+
+    if (source === "local") {
+      buttons.unshift([Markup.button.callback("➕ Add Event", "agenda_add")]);
+    }
+
+    if (!integration) {
+      buttons.push([Markup.button.callback("🔗 Connect Google Calendar", "calendar_connect_prompt")]);
+    } else {
+      buttons.push([Markup.button.callback("📅 Today's AI Summary", "calendar_today")]);
+    }
+
+    await ctx.reply(`📅 Today's Agenda\n\n${eventList}`, Markup.inlineKeyboard(buttons));
+  });
+
+  bot.action("calendar_connect_prompt", async (ctx) => {
+    await ctx.answerCbQuery();
+    const user = await getUserByTelegramId(ctx.from.id);
+    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
+    const url = `${baseUrl}/auth/google?telegramId=${user.telegramId}`;
+
+    await ctx.reply(
+      "🔗 Connect Google Calendar\n\nAllow Atlas to read your calendar for meeting prep and daily insights.",
+      Markup.inlineKeyboard([[Markup.button.url("Connect", url)]]),
+    );
+  });
+
+  bot.action("calendar_today", async (ctx) => {
+    await ctx.answerCbQuery();
+    let loading;
+    try {
+      const user = await getUserByTelegramId(ctx.from.id);
+      const pref = await createOrUpdatePreference(user.id);
+
+      const events = await calendarService.getTodayEvents(user.id);
+
+      loading = await ctx.reply("🧠 Atlas is thinking...");
+
+      const insight = await aiService.generateCalendarInsight({
+        profile: pref.profile || {},
+        events,
+      });
+
+      await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id);
+      await ctx.reply(`📅 Today\n\n${insight}`);
+    } catch (err) {
+      if (loading) await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id).catch(() => {});
+      return handleError(ctx, err);
+    }
+  });
+
+  bot.action("agenda_add", async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.session.mode = "agenda";
+    ctx.session.step = "add_event";
+    await ctx.reply(
+      "Type your event in this format:\n\nHH:MM Event Title\n\nExample:\n09:00 Standup\n11:00 Interview\n16:00 Assignment Review",
+    );
+  });
+
+  bot.action("agenda_prepare", async (ctx) => {
+    await ctx.answerCbQuery();
+    let loading;
+    try {
+      const user = await getUserByTelegramId(ctx.from.id);
+      const pref = await createOrUpdatePreference(user.id);
+
+      // Try Google Calendar first, fall back to local
+      const integration = await calendarService.getIntegration(user.id);
+      let next = null;
+
+      if (integration) {
+        const events = await calendarService.getTodayEvents(user.id);
+        const now = new Date();
+        next = events.find((e) => e.start && new Date(e.start) >= now) || null;
+        if (next) next = { title: next.title, time: new Date(next.start).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) };
+      } else {
+        next = await agendaService.getNextEvent(user.id);
+      }
+
+      if (!next) {
+        return ctx.reply("📅 No upcoming meetings found for today.");
+      }
+
+      loading = await ctx.reply("🧠 Atlas is thinking...");
+
+      const prep = await aiService.generateMeetingPrep({
+        profile: pref.profile || {},
+        event: next,
+      });
+
+      await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id);
+      await ctx.reply(`📋 Prep for: ${next.title} at ${next.time}\n\n${prep}`);
+    } catch (err) {
+      if (loading) await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id).catch(() => {});
+      return handleError(ctx, err);
+    }
+  });
+
+  // ─── Settings ──────────────────────────────────────────────────────────────
 
   bot.action("settings", async (ctx) => {
     await ctx.answerCbQuery();
@@ -171,6 +314,8 @@ module.exports = (bot) => {
     await ctx.reply(`❓ Help\n\n${HELP_TEXT}`);
   });
 
+  // ─── Watchlist ─────────────────────────────────────────────────────────────
+
   bot.action("watchlist", async (ctx) => {
     await ctx.answerCbQuery();
     ctx.session.mode = "watchlist";
@@ -235,22 +380,20 @@ module.exports = (bot) => {
     let loading;
     try {
       await ctx.answerCbQuery();
-
       const user = await getUserByTelegramId(ctx.from.id);
       const pref = await createOrUpdatePreference(user.id);
 
       loading = await ctx.reply("🧠 Atlas is thinking...");
-
       const briefing = await briefingService.generate(pref.profile || {}, user.id);
-
       await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id);
-
       await ctx.reply(briefing);
     } catch (err) {
       if (loading) await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id).catch(() => {});
       return handleError(ctx, err);
     }
   });
+
+  // ─── Text handler ──────────────────────────────────────────────────────────
 
   // 🔹 Single text handler, dispatching on ctx.session.mode.
   // NOTE: this MUST stay a single bot.on("text") registration. Telegraf chains
@@ -269,10 +412,37 @@ module.exports = (bot) => {
         return handleWatchlistMessage(ctx);
       case "industries":
         return handleIndustriesMessage(ctx);
+      case "agenda":
+        return handleAgendaMessage(ctx);
       default:
         return;
     }
   });
+
+  // ─── Handlers ──────────────────────────────────────────────────────────────
+
+  async function handleAgendaMessage(ctx) {
+    if (ctx.session.step !== "add_event") return;
+
+    const user = await getUserByTelegramId(ctx.from.id);
+    const text = ctx.message.text.trim();
+
+    const match = text.match(/^(\d{1,2}:\d{2})\s+(.+)$/);
+    if (!match) {
+      return ctx.reply(
+        "Couldn't parse that.\n\nPlease use the format:\nHH:MM Event Title\n\nExample:\n09:00 Standup",
+      );
+    }
+
+    const [, time, title] = match;
+    await agendaService.addEvent(user.id, title.trim(), time);
+    ctx.session.mode = null;
+    ctx.session.step = null;
+
+    return ctx.reply(
+      `✅ Added: ${time}  ${title}\n\nUse 📅 My Agenda to view or prepare for your meetings.`,
+    );
+  }
 
   async function handleOnboardingMessage(ctx) {
     let loading;
@@ -320,7 +490,7 @@ module.exports = (bot) => {
         ctx.session.mode = null;
 
         return ctx.reply(
-          `🎉 You're all set!\n\nHere's what I can help you with today:\n\n📈 Morning Brief\n📰 Market Updates\n💬 Ask Atlas\n⭐ Watchlist\n⚙ Settings`,
+          `🎉 You're all set!\n\nHere's what I can help you with today:\n\n📈 Morning Brief\n📰 Market Updates\n💬 Ask Atlas\n📅 My Agenda\n⭐ Watchlist\n⚙ Settings`,
           homeMenu(),
         );
       }
