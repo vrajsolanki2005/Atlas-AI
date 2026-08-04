@@ -8,35 +8,24 @@ const briefingService = require("../services/briefing/briefingService");
 
 const { bot } = require("../bot/bot");
 
-cron.schedule("0 8 * * *", async () => {
-  console.log("Morning Brief Running");
+cron.schedule("0 18 * * *", async () => {
+  console.log("Evening Brief Running");
 
-  const users = await User.findAll({
-    include: [Preference],
-  });
+  const users = await User.findAll({ include: [Preference] });
 
   for (const user of users) {
     try {
       const pref = user.Preference;
-
       if (!pref) continue;
 
       const profile = pref.profile || {};
-
-      if (profile.briefing !== "morning" && profile.briefing !== "both") continue;
+      if (profile.briefing !== "evening" && profile.briefing !== "both") continue;
 
       const briefing = await briefingService.generate(pref.profile || {}, user.id);
 
-      await BriefingLog.create({
-        UserId: user.id,
-        content: briefing,
-      });
+      await BriefingLog.create({ UserId: user.id, content: briefing });
 
-      await bot.telegram.sendMessage(
-        user.telegramId,
-        briefing,
-        { parse_mode: "Markdown" },
-      );
+      await bot.telegram.sendMessage(user.telegramId, briefing, { parse_mode: "Markdown" });
     } catch (err) {
       console.error(err);
     }

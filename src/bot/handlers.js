@@ -1,5 +1,6 @@
 const { Markup } = require("telegraf");
 const homeMenu = require("../utils/menu");
+const handleError = require("../utils/errorHandler");
 
 const {
   createOrFindUser,
@@ -9,6 +10,7 @@ const {
 const aiService = require("../services/aiService");
 const memoryService = require("../services/memoryService");
 const briefingService = require("../services/briefing/briefingService");
+const conversationService = require("../services/ConversationService");
 const WatchlistService = require("../services/watchlist/watchlistService");
 const watchlistService = new WatchlistService();
 
@@ -18,6 +20,8 @@ const {
 } = require("../services/preferenceService");
 
 const DONE_MSG = `✅ Done!\n\nYour preferences have been updated.\nAtlas will personalize future briefings accordingly.`;
+
+const HELP_TEXT = `You can ask me things like:\n\n• What happened today?\n• Compare Apple and Microsoft\n• Explain Nvidia earnings\n• What changed since yesterday?\n• Give me today's market summary\n• What's happening in AI?`;
 
 module.exports = (bot) => {
   bot.start(async (ctx) => {
@@ -41,6 +45,19 @@ module.exports = (bot) => {
         [Markup.button.callback("Skip", "skip")],
       ]),
     );
+  });
+
+  bot.command("help", async (ctx) => {
+    await ctx.reply(HELP_TEXT);
+  });
+
+  bot.command("reset", async (ctx) => {
+    const user = await getUserByTelegramId(ctx.from.id);
+    await conversationService.clearConversation(user.id);
+    await updateProfile(user.id, {});
+    ctx.session.mode = null;
+    ctx.session.step = null;
+    await ctx.reply("✅ Atlas has forgotten your profile and conversation history.");
   });
 
   bot.action("start_onboarding", async (ctx) => {
@@ -149,6 +166,11 @@ module.exports = (bot) => {
     await ctx.reply("What would you like to do today?", homeMenu());
   });
 
+  bot.action("help", async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply(`❓ Help\n\n${HELP_TEXT}`);
+  });
+
   bot.action("watchlist", async (ctx) => {
     await ctx.answerCbQuery();
     ctx.session.mode = "watchlist";
@@ -172,7 +194,11 @@ module.exports = (bot) => {
     await ctx.answerCbQuery();
     const user = await getUserByTelegramId(ctx.from.id);
     const list = await watchlistService.getAll(user.id);
-    if (!list.length) return ctx.reply("No companies followed yet.");
+    if (!list.length) {
+      return ctx.reply(
+        "⭐ Your watchlist is empty.\n\nStart following companies like:\n\n• Nvidia\n• Tesla\n• Apple\n• Microsoft",
+      );
+    }
     await ctx.reply(`⭐ Your Watchlist\n\n${list.map((c) => `• ${c.company}`).join("\n")}`);
   });
 
@@ -206,25 +232,23 @@ module.exports = (bot) => {
   });
 
   bot.action("brief", async (ctx) => {
-    let interval;
+    let loading;
     try {
       await ctx.answerCbQuery();
 
       const user = await getUserByTelegramId(ctx.from.id);
       const pref = await createOrUpdatePreference(user.id);
 
-      interval = await startTyping(ctx);
+      loading = await ctx.reply("🧠 Atlas is thinking...");
 
       const briefing = await briefingService.generate(pref.profile || {}, user.id);
 
-      clearInterval(interval);
+      await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id);
 
       await ctx.reply(briefing);
     } catch (err) {
-      console.error(err);
-      await ctx.reply("⚠️ Couldn't generate today's briefing.");
-    } finally {
-      if (interval) clearInterval(interval);
+      if (loading) await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id).catch(() => {});
+      return handleError(ctx, err);
     }
   });
 
@@ -250,17 +274,8 @@ module.exports = (bot) => {
     }
   });
 
-  async function startTyping(ctx) {
-    // Fire immediately so users see typing right away, not just after the
-    // first interval tick 4+ seconds in.
-    await ctx.sendChatAction("typing").catch(() => {});
-    return setInterval(() => {
-      ctx.sendChatAction("typing").catch(() => {});
-    }, 4500);
-  }
-
   async function handleOnboardingMessage(ctx) {
-    let interval;
+    let loading;
     try {
       const user = await getUserByTelegramId(ctx.from.id);
       const preference = await createOrUpdatePreference(user.id);
@@ -276,16 +291,15 @@ module.exports = (bot) => {
       // 🔹 Memory service owns storage/ordering — handler just asks for history
       const history = await memoryService.getMemory(user.id, "onboarding");
 
-      interval = await startTyping(ctx);
+      loading = await ctx.reply("🧠 Atlas is thinking...");
 
-      // 🔹 Call AI
       const ai = await aiService.analyzeConversation({
         profile: preference.profile,
         history,
         message: ctx.message.text,
       });
 
-      clearInterval(interval);
+      await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id);
 
       // 🔹 Validate AI response defensively — don't trust LLM output shape
       if (
@@ -317,19 +331,13 @@ module.exports = (bot) => {
         role: "assistant",
         message: ai.nextQuestion,
         intent: "onboarding",
-        metadata: {
-          model: "llama-3.3-70b-versatile",
-        },
+        metadata: { model: "llama-3.3-70b-versatile" },
       });
 
       return ctx.reply(ai.nextQuestion);
     } catch (err) {
-      console.error(err);
-      return ctx.reply(
-        `⚠️ I'm having trouble understanding right now.\nPlease try again in a few seconds.`,
-      );
-    } finally {
-      if (interval) clearInterval(interval);
+      if (loading) await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id).catch(() => {});
+      return handleError(ctx, err);
     }
   }
 
@@ -359,7 +367,7 @@ module.exports = (bot) => {
   }
 
   async function handleChatMessage(ctx) {
-    let interval;
+    let loading;
     try {
       const user = await getUserByTelegramId(ctx.from.id);
       const preference = await createOrUpdatePreference(user.id);
@@ -370,7 +378,7 @@ module.exports = (bot) => {
       const watchlist = await watchlistService.getAll(user.id);
       const watchedCompanies = watchlist.map((c) => c.company);
 
-      interval = await startTyping(ctx);
+      loading = await ctx.reply("🧠 Atlas is thinking...");
 
       const reply = await aiService.generateReply({
         profile: preference.profile,
@@ -379,7 +387,7 @@ module.exports = (bot) => {
         watchedCompanies,
       });
 
-      clearInterval(interval);
+      await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id);
 
       if (typeof reply !== "string" || !reply.trim()) {
         throw new Error("Invalid AI Response");
@@ -414,12 +422,8 @@ module.exports = (bot) => {
 
       return;
     } catch (err) {
-      console.error(err);
-      return ctx.reply(
-        `⚠️ I'm having trouble answering that right now.\nPlease try again in a few seconds.`,
-      );
-    } finally {
-      if (interval) clearInterval(interval);
+      if (loading) await ctx.telegram.deleteMessage(ctx.chat.id, loading.message_id).catch(() => {});
+      return handleError(ctx, err);
     }
   }
 };

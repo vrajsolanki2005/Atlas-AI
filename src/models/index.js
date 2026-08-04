@@ -3,6 +3,7 @@ require('./User');
 require('./Preference');
 require('./Conversation');
 require('./BriefingLog');
+require('./Watchlist');
 
 async function syncDb() {
     try {

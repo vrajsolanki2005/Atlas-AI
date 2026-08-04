@@ -1,21 +1,17 @@
-const { Telegraf, session, Scenes } = require("telegraf");
+const { Telegraf, session } = require("telegraf");
 const registerHandlers = require("./handlers");
-const onboardingScene = require("../scenes/onboarding.scene");
-const Conversation = require("../models/Conversation");
+const botRateLimit = require("../middleware/botRateLimit");
+const logger = require("../utils/logger");
+
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const stage = new Scenes.Stage([onboardingScene]);
 
 bot.use(session());
-
-bot.use(stage.middleware());
+bot.use(botRateLimit);
 
 function startBot() {
-    registerHandlers(bot);
-
-    bot.launch();
-
-    console.log("Atlas Bot Started");
+  registerHandlers(bot);
+  bot.launch();
+  logger.info("Atlas Bot Started");
 }
-
 
 module.exports = { bot, startBot };
