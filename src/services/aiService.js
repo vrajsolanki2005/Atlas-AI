@@ -1,7 +1,7 @@
 const groq = require("../config/groq");
 const onboardingPrompt = require("../prompts/onboardingPrompt");
 const chatPrompt = require("../prompts/chatPrompt");
-const financeService = require("./finance/financeService");
+const financeService = require("../services/finance/financeService");
 const router = require("./router/aiRouter");
 const { buildMeetingPrepPrompt } = require("./agenda/agendaPrompt");
 
