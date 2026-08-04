@@ -6,19 +6,15 @@ function buildPrompt(profile, history, question){
 
 You are an intelligent finance assistant.
 
-When live financial context is available:
+When live financial news is provided:
 
-• Never copy articles.
-
-• Summarize information.
-
-• Explain WHY it matters.
-
-• Mention possible impact.
-
-Keep answers under 200 words.
-
-Always prioritize user preferences.
+1. Explain what happened.
+2. Explain WHY it matters.
+3. Mention who is affected.
+4. Mention possible risks.
+5. Keep under 150 words.
+6. Never copy articles.
+7. Avoid repeating information.
 
 If no finance context exists,
 answer normally.

@@ -8,6 +8,9 @@ const {
 
 const aiService = require("../services/aiService");
 const memoryService = require("../services/memoryService");
+const briefingService = require("../services/briefing/briefingService");
+const WatchlistService = require("../services/watchlist/watchlistService");
+const watchlistService = new WatchlistService();
 
 const {
   createOrUpdatePreference,
@@ -72,6 +75,54 @@ For example:
     return ctx.reply("You're ready 🚀", homeMenu());
   });
 
+  bot.action("watchlist", async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.session.mode = "watchlist";
+    await ctx.reply(
+      "⭐ Watchlist\n\nChoose an option",
+      Markup.inlineKeyboard([
+        [Markup.button.callback("➕ Add Company", "add_company")],
+        [Markup.button.callback("📄 View Watchlist", "view_watchlist")],
+        [Markup.button.callback("➖ Remove Company", "remove_company")],
+      ]),
+    );
+  });
+
+  bot.action("add_company", async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.session.step = "add_company";
+    await ctx.reply("Type the company name.\n\nExample:\nTesla");
+  });
+
+  bot.action("view_watchlist", async (ctx) => {
+    await ctx.answerCbQuery();
+    const user = await getUserByTelegramId(ctx.from.id);
+    const list = await watchlistService.getAll(user.id);
+    if (!list.length) return ctx.reply("No companies followed yet.");
+    await ctx.reply(`⭐ Your Watchlist\n\n${list.map((c) => `• ${c.company}`).join("\n")}`);
+  });
+
+  bot.action("remove_company", async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.session.step = "remove_company";
+    await ctx.reply("Type company name to remove.");
+  });
+
+  bot.action("watchlist_add_yes", async (ctx) => {
+    await ctx.answerCbQuery();
+    const user = await getUserByTelegramId(ctx.from.id);
+    const company = ctx.session.suggestedCompany;
+    if (!company) return;
+    await watchlistService.add(user.id, company);
+    ctx.session.suggestedCompany = null;
+    await ctx.reply(`✅ ${company} added to your watchlist.`);
+  });
+
+  bot.action("watchlist_add_no", async (ctx) => {
+    await ctx.answerCbQuery();
+    ctx.session.suggestedCompany = null;
+  });
+
   bot.action("ask", async (ctx) => {
     await ctx.answerCbQuery();
 
@@ -80,6 +131,30 @@ For example:
     await ctx.reply(
       "💬 Ask me anything about finance, companies, markets, or today's news.",
     );
+  });
+
+  bot.action("brief", async (ctx) => {
+    console.log("Brief clicked");
+    let interval;
+    try {
+      await ctx.answerCbQuery();
+
+      const user = await getUserByTelegramId(ctx.from.id);
+      const pref = await createOrUpdatePreference(user.id);
+
+      interval = await startTyping(ctx);
+
+      const briefing = await briefingService.generate(pref.profile || {}, user.id);
+
+      clearInterval(interval);
+
+      await ctx.reply(briefing);
+    } catch (err) {
+      console.error(err);
+      await ctx.reply("⚠️ Couldn't generate today's briefing.");
+    } finally {
+      if (interval) clearInterval(interval);
+    }
   });
 
   // 🔹 Single text handler, dispatching on ctx.session.mode.
@@ -95,10 +170,8 @@ For example:
         return handleOnboardingMessage(ctx);
       case "chat":
         return handleChatMessage(ctx);
-      // case "finance":
-      //   return handleFinanceMessage(ctx);
-      // case "watchlist":
-      //   return handleWatchlistMessage(ctx);
+      case "watchlist":
+        return handleWatchlistMessage(ctx);
       default:
         return;
     }
@@ -187,6 +260,23 @@ For example:
     }
   }
 
+  async function handleWatchlistMessage(ctx) {
+    const user = await getUserByTelegramId(ctx.from.id);
+    const company = ctx.message.text.trim();
+
+    if (ctx.session.step === "add_company") {
+      await watchlistService.add(user.id, company);
+      ctx.session.step = null;
+      return ctx.reply(`✅ ${company} added to your watchlist.`);
+    }
+
+    if (ctx.session.step === "remove_company") {
+      await watchlistService.remove(user.id, company);
+      ctx.session.step = null;
+      return ctx.reply("✅ Removed.");
+    }
+  }
+
   async function handleChatMessage(ctx) {
     let interval;
     try {
@@ -196,12 +286,16 @@ For example:
       const history = await memoryService.getMemory(user.id, "chat");
       const trimmedHistory = history.slice(-8);
 
+      const watchlist = await watchlistService.getAll(user.id);
+      const watchedCompanies = watchlist.map((c) => c.company);
+
       interval = await startTyping(ctx);
 
       const reply = await aiService.generateReply({
         profile: preference.profile,
         history: trimmedHistory,
         question: ctx.message.text,
+        watchedCompanies,
       });
 
       clearInterval(interval);
@@ -210,7 +304,14 @@ For example:
         throw new Error("Invalid AI Response");
       }
 
-      // 🔹 Save before replying — keep this order
+      // Auto-suggest: detect company mentioned but not in watchlist
+      const mentioned = watchedCompanies.length
+        ? ctx.message.text.match(/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\b/g) || []
+        : [];
+      const notFollowed = mentioned.find(
+        (w) => !watchedCompanies.some((c) => c.toLowerCase() === w.toLowerCase()),
+      );
+
       await memoryService.remember({
         userId: user.id,
         userMessage: ctx.message.text,
@@ -218,7 +319,19 @@ For example:
         intent: "chat",
       });
 
-      return ctx.reply(reply);
+      await ctx.reply(reply);
+
+      if (notFollowed) {
+        ctx.session.suggestedCompany = notFollowed;
+        await ctx.reply(
+          `Would you like me to follow ${notFollowed}?`,
+          Markup.inlineKeyboard([
+            [Markup.button.callback("Yes", "watchlist_add_yes"), Markup.button.callback("No", "watchlist_add_no")],
+          ]),
+        );
+      }
+
+      return;
     } catch (err) {
       console.error(err);
       return ctx.reply(

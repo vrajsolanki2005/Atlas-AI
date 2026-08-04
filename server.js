@@ -1,5 +1,5 @@
 require("dotenv").config();
-
+require("./src/cron/morningBrief.job");
 const app = require("./src/app");
 const { syncDb } = require("./src/models");
 const { startBot } = require("./src/bot/bot");

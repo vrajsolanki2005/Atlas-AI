@@ -2,6 +2,7 @@ const sequelize = require('../config/db');
 require('./User');
 require('./Preference');
 require('./Conversation');
+require('./BriefingLog');
 
 async function syncDb() {
     try {

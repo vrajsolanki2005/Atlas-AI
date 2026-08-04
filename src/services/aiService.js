@@ -1,7 +1,7 @@
 const groq = require("../config/groq");
 const onboardingPrompt = require("../prompts/onboardingPrompt");
 const chatPrompt = require("../prompts/chatPrompt");
-const financeService =require("../services/finance/finanaceService");
+const financeService = require("../services/finance/finanaceService");
 
 class AIService {
   async analyzeConversation({ profile = {}, history = [], message }) {
@@ -52,94 +52,111 @@ ${message}
     }
   }
 
- async generateReply({ profile = {}, history = [], question }) {
-  try {
+  async generateReply({
+    profile = {},
+    history = [],
+    question,
+    financeNews = [],
+    watchedCompanies = [],
+  }) {
+    try {
+      let financeContext = financeNews
+        .map(
+          (article) => `
 
-    let financeContext = "";
+      Title:
+      ${article.title}
 
-    console.log("Question:", question);
-    console.log("Finance?", financeService.isFinanceQuestion(question));
+      Summary:
+      ${article.description}
 
-    if (financeService.isFinanceQuestion(question)) {
+      `,
+        )
+        .join("\n");
 
-      const financeData =
-        await financeService.getContext(question);
+      console.log("Question:", question);
+      console.log("Finance?", financeService.isFinanceQuestion(question));
 
-      console.log("financeData:", financeData);
+      if (financeService.isFinanceQuestion(question)) {
+        const financeData = await financeService.getContext(question);
 
-      if (financeData.news.length) {
+        console.log("financeData:", financeData);
 
-        financeContext = financeData.news
-          .map(
-            (article, index) => `
-${index + 1}. ${article.title}
+        if (financeData.news.length) {
+          financeContext = financeData.news
+            .map(
+              (article) => `
+Title:
+${article.title}
 
-Description: ${article.description || "N/A"}
+Summary:
+${article.description}
 
-Source: ${article.source?.name || "Unknown"}
-`
-          )
-          .join("\n");
+Source:
+${article.source?.name}
 
+Published:
+${article.publishedAt}
+`,
+            )
+            .join("\n");
+        }
       }
-    }
 
-    console.log("Finance Context:", financeContext);
+      console.log("Finance Context:", financeContext);
 
-    const formattedHistory = history.map(msg => ({
-      role: msg.role,
-      content: msg.content ?? msg.message,
-    }));
+      const formattedHistory = history.map((msg) => ({
+        role: msg.role,
+        content: msg.content ?? msg.message,
+      }));
 
-    const messages = [
-      {
-        role: "system",
-        content: chatPrompt,
-      },
-      {
-        role: "system",
-        content: `User Profile:
+      const messages = [
+        {
+          role: "system",
+          content: chatPrompt,
+        },
+        {
+          role: "system",
+          content: `User Profile:
 ${JSON.stringify(profile, null, 2)}
 
-${financeContext ? `Live Financial Context:
-${financeContext}` : ""}`,
-      },
-      ...formattedHistory,
-      {
-        role: "user",
-        content: question,
-      },
-    ];
+${watchedCompanies.length ? `Companies followed by user: ${watchedCompanies.join(", ")}\nReference these naturally when relevant.` : ""}
 
-    console.log("Messages:", JSON.stringify(messages, null, 2));
+${
+  financeContext
+    ? `Live Financial Context:
+${financeContext}`
+    : ""
+}`,
+        },
+        ...formattedHistory,
+        {
+          role: "user",
+          content: question,
+        },
+      ];
 
-    const response =
-      await groq.chat.completions.create({
+      console.log("Messages:", JSON.stringify(messages, null, 2));
+
+      const response = await groq.chat.completions.create({
         model: "llama-3.3-70b-versatile",
         messages,
         temperature: 0.5,
       });
 
-    const content =
-      response.choices[0]?.message?.content;
+      const content = response.choices[0]?.message?.content;
 
-    if (!content?.trim()) {
-      throw new Error("Empty response");
+      if (!content?.trim()) {
+        throw new Error("Empty response");
+      }
+
+      return content.trim();
+    } catch (error) {
+      console.error("AI Service Error (generateReply):", error);
+
+      throw error;
     }
-
-    return content.trim();
-
-  } catch (error) {
-
-    console.error(
-      "AI Service Error (generateReply):",
-      error
-    );
-
-    throw error;
-
   }
-}
 }
 
 module.exports = new AIService();
