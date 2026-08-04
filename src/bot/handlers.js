@@ -194,12 +194,13 @@ For example:
       const preference = await createOrUpdatePreference(user.id);
 
       const history = await memoryService.getMemory(user.id, "chat");
+      const trimmedHistory = history.slice(-8);
 
       interval = await startTyping(ctx);
 
       const reply = await aiService.generateReply({
         profile: preference.profile,
-        history,
+        history: trimmedHistory,
         question: ctx.message.text,
       });
 
