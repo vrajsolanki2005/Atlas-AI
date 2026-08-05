@@ -1,33 +1,26 @@
-const fs = require("fs");
+const { createLogger, format, transports } = require("winston");
 const path = require("path");
+const fs = require("fs");
 
 const logsDir = path.join(__dirname, "../../logs");
+if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
-}
-
-const atlasStream = fs.createWriteStream(path.join(logsDir, "atlas.log"), { flags: "a" });
-const errorStream = fs.createWriteStream(path.join(logsDir, "error.log"), { flags: "a" });
-
-function formatLine(level, message) {
-  return `[${new Date().toISOString()}] [${level}] ${message}\n`;
-}
-
-const logger = {
-  info(message) {
-    const line = formatLine("INFO", message);
-    process.stdout.write(line);
-    atlasStream.write(line);
-  },
-
-  error(message, err) {
-    const detail = err instanceof Error ? ` — ${err.message}` : "";
-    const line = formatLine("ERROR", `${message}${detail}`);
-    process.stderr.write(line);
-    errorStream.write(line);
-    atlasStream.write(line);
-  },
-};
+const logger = createLogger({
+  level: "info",
+  format: format.combine(
+    format.timestamp({ format: "YYYY-MM-DDTHH:mm:ss.SSSZ" }),
+    format.errors({ stack: true }),
+    format.printf(({ timestamp, level, message, stack }) =>
+      stack
+        ? `[${timestamp}] [${level.toUpperCase()}] ${message}\n${stack}`
+        : `[${timestamp}] [${level.toUpperCase()}] ${message}`,
+    ),
+  ),
+  transports: [
+    new transports.Console(),
+    new transports.File({ filename: path.join(logsDir, "atlas.log") }),
+    new transports.File({ filename: path.join(logsDir, "error.log"), level: "error" }),
+  ],
+});
 
 module.exports = logger;

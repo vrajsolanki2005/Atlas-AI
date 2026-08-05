@@ -8,8 +8,10 @@ const briefingService = require("../services/briefing/briefingService");
 
 const { bot } = require("../bot/bot");
 
+const logger = require("../utils/logger");
+
 cron.schedule("0 8 * * *", async () => {
-  console.log("Morning Brief Running");
+  logger.info("Morning Brief Running");
 
   const users = await User.findAll({
     include: [Preference],
@@ -38,7 +40,7 @@ cron.schedule("0 8 * * *", async () => {
         { parse_mode: "Markdown" },
       );
     } catch (err) {
-      console.error(err);
+      logger.error(`Morning brief failed for user ${user.id}`, err);
     }
   }
 });

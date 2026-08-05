@@ -1,4 +1,6 @@
+const logger = require("../utils/logger");
+
 module.exports = (req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  logger.info(`${req.method} ${req.url}`);
   next();
 };

@@ -3,13 +3,12 @@ const cron = require("node-cron");
 const User = require("../models/User");
 const Preference = require("../models/Preference");
 const BriefingLog = require("../models/BriefingLog");
-
 const briefingService = require("../services/briefing/briefingService");
-
 const { bot } = require("../bot/bot");
+const logger = require("../utils/logger");
 
 cron.schedule("0 18 * * *", async () => {
-  console.log("Evening Brief Running");
+  logger.info("Evening Brief Running");
 
   const users = await User.findAll({ include: [Preference] });
 
@@ -27,7 +26,7 @@ cron.schedule("0 18 * * *", async () => {
 
       await bot.telegram.sendMessage(user.telegramId, briefing, { parse_mode: "Markdown" });
     } catch (err) {
-      console.error(err);
+      logger.error(`Evening brief failed for user ${user.id}`, err);
     }
   }
 });

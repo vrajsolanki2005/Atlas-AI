@@ -62,6 +62,8 @@ module.exports = (bot) => {
     await ctx.reply("✅ Atlas has forgotten your profile and conversation history.");
   });
 
+  bot.command("agenda", (ctx) => showAgenda(ctx));
+
   bot.command("connect_calendar", async (ctx) => {
     const user = await getUserByTelegramId(ctx.from.id);
     const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
@@ -97,14 +99,10 @@ module.exports = (bot) => {
 
   // ─── Agenda ────────────────────────────────────────────────────────────────
 
-  bot.action("agenda", async (ctx) => {
-    await ctx.answerCbQuery();
+  async function showAgenda(ctx) {
     const user = await getUserByTelegramId(ctx.from.id);
-
-    // Prefer Google Calendar if connected, fall back to local agenda
     const integration = await calendarService.getIntegration(user.id);
-    let events;
-    let source;
+    let events, source;
 
     if (integration) {
       try {
@@ -121,20 +119,18 @@ module.exports = (bot) => {
 
     const eventList = events.length
       ? events.map((e) => {
-          if (source === "google") {
-            const time = e.start ? new Date(e.start).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "";
-            return `🕐 ${time}  ${e.title}`;
-          }
-          return `🕐 ${e.time}  ${e.title}`;
+          const time = source === "google"
+            ? (e.start ? new Date(e.start).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "")
+            : e.time;
+          return `🕐 ${time}  ${e.title}`;
         }).join("\n")
       : "No events scheduled for today.";
 
     const buttons = [
+      [Markup.button.callback("➕ Add Event", "agenda_add")],
       [Markup.button.callback("🧠 Prepare for Next Meeting", "agenda_prepare")],
       [Markup.button.callback("🏠 Home", "home")],
     ];
-
-    buttons.unshift([Markup.button.callback("➕ Add Event", "agenda_add")]);
 
     if (!integration) {
       buttons.push([Markup.button.callback("🔗 Connect Google Calendar", "calendar_connect_prompt")]);
@@ -143,6 +139,11 @@ module.exports = (bot) => {
     }
 
     await ctx.reply(`📅 Today's Agenda\n\n${eventList}`, Markup.inlineKeyboard(buttons));
+  }
+
+  bot.action("agenda", async (ctx) => {
+    await ctx.answerCbQuery();
+    return showAgenda(ctx);
   });
 
   bot.action("calendar_connect_prompt", async (ctx) => {

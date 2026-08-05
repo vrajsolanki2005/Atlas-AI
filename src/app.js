@@ -8,6 +8,7 @@ const loggerMiddleware = require("./middleware/loggerMiddleware");
 const rateLimitMiddleware = require("./middleware/rateLimit");
 const healthRoute = require("./routes/healthRoute");
 const authRoute = require("./routes/authRoute");
+const swaggerRoute = require("./routes/swaggerRoute");
 const ApiResponse = require("./utils/apiResponse");
 
 const app = express();
@@ -27,6 +28,7 @@ app.use(session({
 
 app.use("/", healthRoute);
 app.use("/", authRoute);
+app.use("/", swaggerRoute);
 
 app.get("/", (req, res) => {
   res.json(ApiResponse.success({}, "Server is running"));
