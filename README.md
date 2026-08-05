@@ -1,7 +1,7 @@
 
 <div align="center">
 
-# 🧭 Atlas AI
+# Atlas AI
 
 ### Your Personal Intelligence Layer for Telegram
 
