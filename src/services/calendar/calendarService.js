@@ -10,25 +10,24 @@ function getOAuthClient() {
   );
 }
 
-function startOfDay(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
+function startOfDay(date, timeZone) {
+  const d = new Date(date.toLocaleDateString("en-CA", { timeZone }) + "T00:00:00");
   return d.toISOString();
 }
 
-function endOfDay(date) {
-  const d = new Date(date);
-  d.setHours(23, 59, 59, 999);
+function endOfDay(date, timeZone) {
+  const d = new Date(date.toLocaleDateString("en-CA", { timeZone }) + "T23:59:59");
   return d.toISOString();
 }
 
 class CalendarService {
-  async saveIntegration(userId, { googleEmail, accessToken, refreshToken, expiryDate }) {
+  async saveIntegration(userId, { googleEmail, accessToken, refreshToken, expiryDate, timeZone }) {
     const encrypted = {
       googleEmail,
       accessToken: encrypt(accessToken),
       refreshToken: refreshToken ? encrypt(refreshToken) : null,
       expiryDate,
+      timeZone: timeZone || "UTC",
       connectedAt: new Date(),
     };
 
@@ -47,6 +46,7 @@ class CalendarService {
       accessToken: decrypt(row.accessToken),
       refreshToken: row.refreshToken ? decrypt(row.refreshToken) : null,
       expiryDate: row.expiryDate,
+      timeZone: row.timeZone || "UTC",
     };
   }
 
@@ -60,6 +60,17 @@ class CalendarService {
       refresh_token: integration.refreshToken,
       expiry_date: integration.expiryDate,
     });
+
+    auth.on("tokens", async (tokens) => {
+      const update = {};
+      if (tokens.access_token) update.accessToken = encrypt(tokens.access_token);
+      if (tokens.expiry_date) update.expiryDate = tokens.expiry_date;
+      if (tokens.refresh_token) update.refreshToken = encrypt(tokens.refresh_token);
+      if (Object.keys(update).length) {
+        await CalendarIntegration.update(update, { where: { userId } });
+      }
+    });
+
     return auth;
   }
 
@@ -94,18 +105,19 @@ class CalendarService {
     return this._formatEvents(data.items || []);
   }
 
-  async createEvent(userId, { title, startTime, endTime, description = "" }) {
+  async createEvent(userId, { title, startTime, endTime, description = "", timeZone }) {
     const auth = await this.getAuthClient(userId);
     if (!auth) throw new Error("Calendar not connected");
 
+    const tz = timeZone || (await this.getIntegration(userId))?.timeZone || "UTC";
     const calendar = google.calendar({ version: "v3", auth });
     const { data } = await calendar.events.insert({
       calendarId: "primary",
       requestBody: {
         summary: title,
         description,
-        start: { dateTime: startTime },
-        end: { dateTime: endTime },
+        start: { dateTime: startTime, timeZone: tz },
+        end: { dateTime: endTime, timeZone: tz },
       },
     });
     return data;
@@ -123,13 +135,17 @@ class CalendarService {
     const auth = await this.getAuthClient(userId);
     if (!auth) return [];
 
+    const integration = await this.getIntegration(userId);
+    const timeZone = integration?.timeZone || "UTC";
+
     const calendar = google.calendar({ version: "v3", auth });
     const { data } = await calendar.events.list({
       calendarId: "primary",
-      timeMin: startOfDay(date),
-      timeMax: endOfDay(date),
+      timeMin: startOfDay(date, timeZone),
+      timeMax: endOfDay(date, timeZone),
       singleEvents: true,
       orderBy: "startTime",
+      timeZone,
     });
 
     return this._formatEvents(data.items || []);

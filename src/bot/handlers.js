@@ -107,8 +107,13 @@ module.exports = (bot) => {
     let source;
 
     if (integration) {
-      events = await calendarService.getTodayEvents(user.id);
-      source = "google";
+      try {
+        events = await calendarService.getTodayEvents(user.id);
+        source = "google";
+      } catch {
+        events = await agendaService.getTodayEvents(user.id);
+        source = "local";
+      }
     } else {
       events = await agendaService.getTodayEvents(user.id);
       source = "local";
@@ -129,9 +134,7 @@ module.exports = (bot) => {
       [Markup.button.callback("🏠 Home", "home")],
     ];
 
-    if (source === "local") {
-      buttons.unshift([Markup.button.callback("➕ Add Event", "agenda_add")]);
-    }
+    buttons.unshift([Markup.button.callback("➕ Add Event", "agenda_add")]);
 
     if (!integration) {
       buttons.push([Markup.button.callback("🔗 Connect Google Calendar", "calendar_connect_prompt")]);
@@ -199,10 +202,14 @@ module.exports = (bot) => {
       let next = null;
 
       if (integration) {
-        const events = await calendarService.getTodayEvents(user.id);
-        const now = new Date();
-        next = events.find((e) => e.start && new Date(e.start) >= now) || null;
-        if (next) next = { title: next.title, time: new Date(next.start).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) };
+        try {
+          const events = await calendarService.getTodayEvents(user.id);
+          const now = new Date();
+          next = events.find((e) => e.start && new Date(e.start) >= now) || null;
+          if (next) next = { title: next.title, time: new Date(next.start).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) };
+        } catch {
+          next = await agendaService.getNextEvent(user.id);
+        }
       } else {
         next = await agendaService.getNextEvent(user.id);
       }
@@ -434,14 +441,27 @@ module.exports = (bot) => {
       );
     }
 
-    const [, time, title] = match;
-    await agendaService.addEvent(user.id, title.trim(), time);
+    const [, time, title] = match.map((s) => (s ? s.trim() : s));
+    const integration = await calendarService.getIntegration(user.id);
+
+    if (integration) {
+      const timeZone = integration.timeZone || "UTC";
+      const today = new Date().toLocaleDateString("en-CA", { timeZone }); // YYYY-MM-DD
+      const startTime = new Date(`${today}T${time}:00`);
+      const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // +1 hour
+      await calendarService.createEvent(user.id, {
+        title,
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        timeZone,
+      });
+    } else {
+      await agendaService.addEvent(user.id, title, time);
+    }
+
     ctx.session.mode = null;
     ctx.session.step = null;
-
-    return ctx.reply(
-      `✅ Added: ${time}  ${title}\n\nUse 📅 My Agenda to view or prepare for your meetings.`,
-    );
+    return ctx.reply(`✅ Added: ${time}  ${title}\n\nUse 📅 My Agenda to view or prepare for your meetings.`);
   }
 
   async function handleOnboardingMessage(ctx) {

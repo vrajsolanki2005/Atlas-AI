@@ -41,9 +41,13 @@ router.get("/auth/google/callback", async (req, res) => {
     const { tokens } = await auth.getToken(code);
     auth.setCredentials(tokens);
 
-    // get email using the same auth instance
     const oauth2 = google.oauth2({ version: "v2", auth });
     const { data: profile } = await oauth2.userinfo.get();
+
+    // Fetch the user's primary calendar timezone
+    const calendar = google.calendar({ version: "v3", auth });
+    const { data: calData } = await calendar.calendars.get({ calendarId: "primary" });
+    const timeZone = calData.timeZone || "UTC";
 
     const user = await User.findOne({ where: { telegramId: String(telegramId) } });
     if (!user) return res.status(404).send("User not found");
@@ -53,6 +57,7 @@ router.get("/auth/google/callback", async (req, res) => {
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
       expiryDate: tokens.expiry_date,
+      timeZone,
     });
 
     res.send(`

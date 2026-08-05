@@ -35,6 +35,10 @@ const CalendarIntegration = sequelize.define("CalendarIntegration", {
     type: DataTypes.DATE,
     defaultValue: DataTypes.NOW,
   },
+  timeZone: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
 });
 
 User.hasOne(CalendarIntegration, { foreignKey: "userId" });
