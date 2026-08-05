@@ -36,13 +36,16 @@ router.get("/auth/google/callback", async (req, res) => {
   try {
     const auth = getOAuthClient();
     const { tokens } = await auth.getToken(code);
+    const { tokens } = await auth.getToken(code);
+    console.log("Tokens received:", tokens);
     auth.setCredentials(tokens);
 
-    // Get Google profile email
-    const oauth2 = google.oauth2({ version: "v2", auth });
+    const oauth2 = google.oauth2({ version: "v2", auth }); // pass same auth
     const { data: profile } = await oauth2.userinfo.get();
 
-    const user = await User.findOne({ where: { telegramId: String(telegramId) } });
+    const user = await User.findOne({
+      where: { telegramId: String(telegramId) },
+    });
     if (!user) return res.status(404).send("User not found");
 
     await calendarService.saveIntegration(user.id, {
@@ -59,11 +62,10 @@ router.get("/auth/google/callback", async (req, res) => {
       </body></html>
     `);
   } catch (err) {
-  console.error("OAuth callback error:", err.message);
-  console.error("OAuth error details:", err.response?.data || err);
-  res.status(500).send(`Authentication failed: ${err.message}`);
-}
-
+    console.error("OAuth callback error:", err.message);
+    console.error("OAuth error details:", err.response?.data || err);
+    res.status(500).send(`Authentication failed: ${err.message}`);
+  }
 });
 
 module.exports = router;
