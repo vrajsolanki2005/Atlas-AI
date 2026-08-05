@@ -20,7 +20,10 @@ router.get("/auth/google", (req, res) => {
   const url = auth.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: ["https://www.googleapis.com/auth/calendar"],
+    scope: [
+      "https://www.googleapis.com/auth/calendar",
+      "https://www.googleapis.com/auth/userinfo.email",  // add this
+    ],
     state: telegramId,
   });
 
@@ -28,24 +31,21 @@ router.get("/auth/google", (req, res) => {
 });
 
 // GET /auth/google/callback
+
 router.get("/auth/google/callback", async (req, res) => {
   const { code, state: telegramId } = req.query;
-
   if (!code || !telegramId) return res.status(400).send("Invalid callback");
 
   try {
     const auth = getOAuthClient();
     const { tokens } = await auth.getToken(code);
-    // const { tokens } = await auth.getToken(code);
-    console.log("Tokens received:", tokens);
     auth.setCredentials(tokens);
 
-    const oauth2 = google.oauth2({ version: "v2", auth }); // pass same auth
+    // get email using the same auth instance
+    const oauth2 = google.oauth2({ version: "v2", auth });
     const { data: profile } = await oauth2.userinfo.get();
 
-    const user = await User.findOne({
-      where: { telegramId: String(telegramId) },
-    });
+    const user = await User.findOne({ where: { telegramId: String(telegramId) } });
     if (!user) return res.status(404).send("User not found");
 
     await calendarService.saveIntegration(user.id, {
@@ -67,5 +67,6 @@ router.get("/auth/google/callback", async (req, res) => {
     res.status(500).send(`Authentication failed: ${err.message}`);
   }
 });
+
 
 module.exports = router;
