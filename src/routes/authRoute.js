@@ -36,7 +36,7 @@ router.get("/auth/google/callback", async (req, res) => {
   try {
     const auth = getOAuthClient();
     const { tokens } = await auth.getToken(code);
-    const { tokens } = await auth.getToken(code);
+    // const { tokens } = await auth.getToken(code);
     console.log("Tokens received:", tokens);
     auth.setCredentials(tokens);
 
