@@ -11,7 +11,7 @@ async function syncDb() {
     try {
         await sequelize.authenticate();
         console.log('Database connection has been established successfully.');
-        await sequelize.sync({ alter: false });
+        await sequelize.sync({ alter: true });
         console.log('All models were synchronized successfully.');
     } catch (error) {
         console.error('Error synchronizing the database:', error);
